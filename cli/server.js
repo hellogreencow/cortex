@@ -126,6 +126,37 @@ async function diagnoseWithOpenRouter(capsule) {
         }
     }
 
+    async function getCreditsInfo() {
+        try {
+            const res = await fetch(`${baseUrl}/credits`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'HTTP-Referer': appUrl,
+                    'X-Title': appName,
+                },
+            });
+
+            const text = await res.text().catch(() => '');
+            if (!res.ok) return { ok: false, status: res.status, text: text.slice(0, 500) };
+
+            const json = JSON.parse(text);
+            const data = json?.data || {};
+            const total = data?.total_credits;
+            const used = data?.total_usage;
+            let remaining = null;
+            try {
+                if (typeof total === 'number' && typeof used === 'number') remaining = total - used;
+            } catch {
+                // ignore
+            }
+            return { ok: true, data: { total_credits: total, total_usage: used, remaining }, raw: json };
+        } catch (e) {
+            const msg = e && typeof e === 'object' && 'message' in e ? String(e.message) : String(e);
+            return { ok: false, status: null, text: msg };
+        }
+    }
+
     const prompt = redactSecrets(
         [
             'You are an expert web debugging assistant.',
@@ -174,6 +205,19 @@ async function diagnoseWithOpenRouter(capsule) {
                     const kr = keyInfo.data?.limit_remaining;
                     const usage = keyInfo.data?.usage;
                     const isFreeTier = keyInfo.data?.is_free_tier;
+                    const credits = await getCreditsInfo();
+                    if (credits.ok) {
+                        const remaining = credits.data?.remaining;
+                        const total = credits.data?.total_credits;
+                        const used = credits.data?.total_usage;
+                        return {
+                            ok: false,
+                            error:
+                                `OpenRouter error 402 (insufficient credits). ` +
+                                `Account credits: total=${total ?? 'unknown'}, used=${used ?? 'unknown'}, remaining=${remaining ?? 'unknown'}. ` +
+                                `Key: limit_remaining=${kr ?? 'null'}, usage=${usage ?? 'unknown'}, is_free_tier=${isFreeTier ?? 'unknown'}.`
+                        };
+                    }
                     return {
                         ok: false,
                         error:
