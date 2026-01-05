@@ -104,6 +104,28 @@ async function diagnoseWithOpenRouter(capsule) {
     const appUrl = process.env.OPENROUTER_APP_URL || 'http://localhost';
     const appName = process.env.OPENROUTER_APP_NAME || 'CORTEX';
 
+    async function getKeyInfo() {
+        try {
+            const res = await fetch(`${baseUrl}/key`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'HTTP-Referer': appUrl,
+                    'X-Title': appName,
+                },
+            });
+
+            const text = await res.text().catch(() => '');
+            if (!res.ok) return { ok: false, status: res.status, text: text.slice(0, 500) };
+
+            const json = JSON.parse(text);
+            return { ok: true, data: json?.data || json };
+        } catch (e) {
+            const msg = e && typeof e === 'object' && 'message' in e ? String(e.message) : String(e);
+            return { ok: false, status: null, text: msg };
+        }
+    }
+
     const prompt = redactSecrets(
         [
             'You are an expert web debugging assistant.',
@@ -146,6 +168,21 @@ async function diagnoseWithOpenRouter(capsule) {
 
         if (!res.ok) {
             const text = await res.text().catch(() => '');
+            if (res.status === 402) {
+                const keyInfo = await getKeyInfo();
+                if (keyInfo.ok) {
+                    const kr = keyInfo.data?.limit_remaining;
+                    const usage = keyInfo.data?.usage;
+                    const isFreeTier = keyInfo.data?.is_free_tier;
+                    return {
+                        ok: false,
+                        error:
+                            `OpenRouter error 402 (insufficient credits). ` +
+                            `Key limit_remaining=${kr ?? 'null'}, usage=${usage ?? 'unknown'}, is_free_tier=${isFreeTier ?? 'unknown'}. ` +
+                            `Raw=${text.slice(0, 300)}`
+                    };
+                }
+            }
             return { ok: false, error: `OpenRouter error ${res.status}: ${text.slice(0, 500)}` };
         }
 
