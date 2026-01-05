@@ -100,6 +100,12 @@ For CORTEX, a typical setup is:
 claude mcp add --transport stdio cortex -- node /absolute/path/to/cortex/cli/mcp-server.mjs
 ```
 
+If you want Claude Code to read capsules from a specific directory, pass `CORTEX_DATA_DIR`:
+
+```bash
+claude mcp add --transport stdio cortex --env CORTEX_DATA_DIR=/absolute/path/to/.cortex -- node /absolute/path/to/cortex/cli/mcp-server.mjs
+```
+
 Docs: `https://code.claude.com/docs/en/mcp`
 
 ### Setup: Cursor
@@ -112,7 +118,10 @@ Cursor uses `mcp.json` configuration. Put this in `.cursor/mcp.json` (project) o
     "cortex": {
       "type": "stdio",
       "command": "node",
-      "args": ["/absolute/path/to/cortex/cli/mcp-server.mjs"]
+      "args": ["/absolute/path/to/cortex/cli/mcp-server.mjs"],
+      "env": {
+        "CORTEX_DATA_DIR": "/absolute/path/to/.cortex"
+      }
     }
   }
 }
