@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const WebSocket = require('ws');
 const chalk = require('chalk');
 const crypto = require('crypto');

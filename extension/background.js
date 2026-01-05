@@ -5,6 +5,10 @@ let isAuthenticated = false;
 let cortexAuthCode = '';
 let cortexAutoCapture = false;
 
+// Buffer a small number of high-value messages so auto-capture doesn't lose events during reconnect/auth.
+const pending = [];
+const MAX_PENDING = 10;
+
 const knownTabIds = new Set();
 
 async function loadConfig() {
@@ -31,6 +35,20 @@ function sendToDaemon(payload) {
     if (!isConnected || !socket || socket.readyState !== WebSocket.OPEN) return false;
     socket.send(JSON.stringify(payload));
     return true;
+}
+
+function enqueue(payload) {
+    pending.push(payload);
+    while (pending.length > MAX_PENDING) pending.shift();
+}
+
+function flushPending() {
+    if (!isConnected || !socket || socket.readyState !== WebSocket.OPEN) return;
+    if (!isAuthenticated) return;
+    while (pending.length) {
+        const item = pending.shift();
+        sendToDaemon(item);
+    }
 }
 
 async function tryAuthenticate() {
@@ -60,6 +78,7 @@ async function connect() {
 
         if (msg && msg.type === 'status' && msg.msg === 'CORTEX_CONNECTED') {
             isAuthenticated = true;
+            flushPending();
         }
 
         broadcastToKnownTabs(msg);
@@ -108,7 +127,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     // Everything else goes to daemon only after auth.
+    const highValue =
+        message &&
+        (message.type === 'capture_request' || message.type === 'diagnose_request' || message.type === 'fix_request');
+
     if (!isAuthenticated) {
+        if (highValue && cortexAuthCode) {
+            enqueue(message);
+            // Try to connect/auth in case the socket is down.
+            if (!isConnected) connect();
+            tryAuthenticate();
+            return;
+        }
+
         if (tabId !== null) {
             chrome.tabs.sendMessage(tabId, { type: 'error', msg: 'NOT_AUTHENTICATED' }, () => {
                 void chrome.runtime.lastError;
@@ -117,6 +148,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
     }
 
-    sendToDaemon(message);
+    // If socket isn't ready, queue high-value messages.
+    const sent = sendToDaemon(message);
+    if (!sent && highValue) {
+        enqueue(message);
+    }
 });
 

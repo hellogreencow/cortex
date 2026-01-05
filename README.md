@@ -22,6 +22,11 @@ npm start
 ```
 The Synapse binds to `127.0.0.1:2112` by default and prints a one-time auth code on startup.
 
+Optional: use a `.env` file (recommended).
+
+- Copy `cli/env.example` → `cli/.env`
+- The daemon and MCP server load `.env` automatically (dotenv).
+
 ### 2. Equip the Sensor (Extension)
 1.  Open Chrome and navigate to `chrome://extensions`.
 2.  Enable **Developer Mode**.
@@ -36,6 +41,7 @@ This is the intended workflow: you reproduce the bug normally, and your coding a
 2. Click the CORTEX extension icon:
    - Paste the auth code
    - Enable **Auto-capture**
+   - (Optional) Click **Capture now** to verify the pipeline immediately
 3. Reproduce the bug in the browser.
 4. In Claude Code / Cursor, ask the agent to pull the latest capsule via MCP (see below).
 
