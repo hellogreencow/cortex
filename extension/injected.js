@@ -2,8 +2,135 @@ class CortexAgent {
     constructor() {
         this.buffer = [];
         this.authCode = null;
+        this.lastError = null;
+        this.lastUnhandledRejection = null;
+        this.lastConsoleError = null;
+        this.failedFetches = [];
+
+        // Only instrument once per page.
+        if (!window.__cortexInstrumented) {
+            window.__cortexInstrumented = true;
+            this.initErrorCapture();
+            this.initNetworkCapture();
+        } else {
+            // If already instrumented (e.g., extension reloaded), reuse any existing state.
+            this.lastError = window.__cortexLastError || null;
+            this.lastUnhandledRejection = window.__cortexLastUnhandledRejection || null;
+            this.lastConsoleError = window.__cortexLastConsoleError || null;
+            this.failedFetches = Array.isArray(window.__cortexFailedFetches) ? window.__cortexFailedFetches : [];
+        }
+
         this.initBuffer();
         console.log("%c CORTEX AGENT ACTIVE ", "background: #000; color: #0f0; font-weight: bold; padding: 4px; border-radius: 4px;");
+    }
+
+    initErrorCapture() {
+        const record = (kind, payload) => {
+            const entry = { kind, timestamp: Date.now(), ...payload };
+            if (kind === 'error') window.__cortexLastError = entry;
+            if (kind === 'unhandledrejection') window.__cortexLastUnhandledRejection = entry;
+            if (kind === 'console_error') window.__cortexLastConsoleError = entry;
+        };
+
+        window.addEventListener('error', (event) => {
+            record('error', {
+                message: String(event?.message || ''),
+                filename: String(event?.filename || ''),
+                lineno: Number(event?.lineno || 0),
+                colno: Number(event?.colno || 0),
+                stack: event?.error?.stack ? String(event.error.stack) : ''
+            });
+        });
+
+        window.addEventListener('unhandledrejection', (event) => {
+            const reason = event?.reason;
+            record('unhandledrejection', {
+                message: reason instanceof Error ? reason.message : String(reason || ''),
+                stack: reason instanceof Error && reason.stack ? String(reason.stack) : ''
+            });
+        });
+
+        if (!console.__cortexWrapped) {
+            console.__cortexWrapped = true;
+            const origError = console.error.bind(console);
+            console.error = (...args) => {
+                try {
+                    record('console_error', {
+                        argsPreview: args.map((a) => {
+                            if (typeof a === 'string') return a.slice(0, 200);
+                            if (a instanceof Error) return `${a.name}: ${a.message}`.slice(0, 200);
+                            try { return JSON.stringify(a).slice(0, 200); } catch { return String(a).slice(0, 200); }
+                        })
+                    });
+                } catch {
+                    // ignore
+                }
+                origError(...args);
+            };
+        }
+    }
+
+    initNetworkCapture() {
+        const sanitizeUrl = (input) => {
+            try {
+                const u = new URL(String(input), window.location.href);
+                const keys = Array.from(u.searchParams.keys()).sort();
+                const q = keys.length ? `?${keys.join('&')}` : '';
+                return `${u.origin}${u.pathname}${q}`;
+            } catch {
+                return String(input || '').slice(0, 500);
+            }
+        };
+
+        const recordFailedFetch = (entry) => {
+            const buf = Array.isArray(window.__cortexFailedFetches) ? window.__cortexFailedFetches : [];
+            buf.push(entry);
+            while (buf.length > 10) buf.shift();
+            window.__cortexFailedFetches = buf;
+        };
+
+        if (!window.__cortexFetchWrapped && typeof window.fetch === 'function') {
+            window.__cortexFetchWrapped = true;
+            const origFetch = window.fetch.bind(window);
+            window.fetch = async (input, init) => {
+                const start = Date.now();
+                let method = 'GET';
+                try {
+                    if (init?.method) method = String(init.method).toUpperCase();
+                    else if (input && typeof input === 'object' && 'method' in input && input.method) method = String(input.method).toUpperCase();
+                } catch {
+                    // ignore
+                }
+
+                try {
+                    const res = await origFetch(input, init);
+                    if (!res.ok) {
+                        recordFailedFetch({
+                            kind: 'fetch',
+                            timestamp: Date.now(),
+                            url: sanitizeUrl(input && typeof input === 'object' && 'url' in input ? input.url : input),
+                            method,
+                            status: res.status,
+                            statusText: String(res.statusText || ''),
+                            durationMs: Date.now() - start
+                        });
+                    }
+                    return res;
+                } catch (err) {
+                    recordFailedFetch({
+                        kind: 'fetch',
+                        timestamp: Date.now(),
+                        url: sanitizeUrl(input && typeof input === 'object' && 'url' in input ? input.url : input),
+                        method,
+                        status: null,
+                        statusText: '',
+                        durationMs: Date.now() - start,
+                        error: err instanceof Error ? `${err.name}: ${err.message}` : String(err || '')
+                    });
+                    throw err;
+                }
+            };
+        }
     }
 
     initBuffer() {
@@ -37,26 +164,41 @@ class CortexAgent {
         return "Attempting handshake with Cortex Core...";
     }
 
-    fix(instruction = "Fix this error") {
+    diagnose(instruction = "Explain what is happening and what to check next") {
         if (!this.authCode) {
             console.warn("%c AUTH REQUIRED ", "color: red; font-weight: bold");
             return "Please run agent.auth('CODE') first.";
         }
 
+        const lastError = window.__cortexLastError || null;
+        const lastUnhandledRejection = window.__cortexLastUnhandledRejection || null;
+        const lastConsoleError = window.__cortexLastConsoleError || null;
+        const failedFetches = Array.isArray(window.__cortexFailedFetches) ? window.__cortexFailedFetches : [];
+
         const capsule = {
-            type: 'fix_request',
+            type: 'diagnose_request',
             instructions: instruction,
             context: {
                 url: window.location.href,
                 title: document.title,
                 dom: this.getSnippet(),
                 actions: this.buffer,
-                selection: (window.getSelection?.().toString?.() || '').slice(0, 256)
+                selection: (window.getSelection?.().toString?.() || '').slice(0, 256),
+                signals: {
+                    lastError,
+                    lastUnhandledRejection,
+                    lastConsoleError,
+                    failedFetches
+                }
             }
         };
         
         this.send(capsule);
-        return "Bug Capsule transmitted to Cortex. Analyzing...";
+        return "Bug Capsule transmitted to Cortex. Diagnosing...";
+    }
+
+    fix(instruction = "Fix this error") {
+        return this.diagnose(instruction);
     }
 
     getSnippet() {
@@ -105,8 +247,14 @@ window.addEventListener("message", (event) => {
     const msg = event.data.detail;
     if (msg.type === 'status') {
         console.log(`%c CORTEX: ${msg.msg} `, "color: #0f0");
+    } else if (msg.type === 'capsule_saved') {
+        console.log(`%c CORTEX: capsule saved (${msg.id}) `, "color: #999");
     } else if (msg.type === 'response') {
         console.log(`%c CORTEX RESPONSE: `, "color: #0ff", msg.msg);
+    } else if (msg.type === 'diagnosis') {
+        const label = msg.ok ? 'CORTEX DIAGNOSIS' : 'CORTEX DIAGNOSIS FAILED';
+        const color = msg.ok ? '#0ff' : '#f00';
+        console.log(`%c ${label} (${msg.id}) `, `color: ${color}`, msg.msg);
     } else if (msg.type === 'error') {
         console.log(`%c CORTEX ERROR: `, "color: #f00", msg.msg);
     }
