@@ -102,6 +102,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : null;
     if (tabId !== null) knownTabIds.add(tabId);
 
+    // Ensure injected agent exists in the page MAIN world (CSP-proof).
+    if (message && message.type === 'ensure_injected') {
+        if (tabId === null) return;
+        chrome.scripting.executeScript(
+            {
+                target: { tabId },
+                world: 'MAIN',
+                files: ['injected.js'],
+            },
+            () => {
+                void chrome.runtime.lastError;
+            }
+        );
+        return;
+    }
+
     // Config requests (content scripts / popup).
     if (message && message.type === 'get_config') {
         sendResponse({ cortexAutoCapture });

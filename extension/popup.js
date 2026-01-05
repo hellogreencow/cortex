@@ -36,8 +36,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   async function runInTab(tabId, mode, note) {
+    // Ensure the agent exists in the page MAIN world (not extension isolated world).
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      files: ["injected.js"],
+    });
+
     const results = await chrome.scripting.executeScript({
       target: { tabId },
+      world: "MAIN",
       func: (m, n) => {
         try {
           const a = window.agent;

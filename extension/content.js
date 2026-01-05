@@ -1,10 +1,7 @@
-// Inject the Beast Agent into the page context
-const script = document.createElement('script');
-script.src = chrome.runtime.getURL('injected.js');
-script.onload = function() {
-    this.remove();
-};
-(document.head || document.documentElement).appendChild(script);
+// Ask the background script to inject the agent into the MAIN world.
+chrome.runtime.sendMessage({ type: 'ensure_injected' }, () => {
+    void chrome.runtime.lastError;
+});
 
 // Request current config from background and forward to the page.
 chrome.runtime.sendMessage({ type: 'get_config' }, (resp) => {
