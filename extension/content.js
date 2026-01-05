@@ -16,7 +16,20 @@ chrome.runtime.sendMessage({ type: 'get_config' }, (resp) => {
 
 // Uplink: Page -> Extension -> Background
 window.addEventListener("cortex-uplink", (event) => {
-    chrome.runtime.sendMessage(event.detail);
+    const detail = event && event.detail ? event.detail : null;
+
+    // Special case: allow injected agent to request config reliably.
+    if (detail && detail.type === 'get_config') {
+        chrome.runtime.sendMessage({ type: 'get_config' }, (resp) => {
+            const err = chrome.runtime.lastError;
+            if (err) return;
+            const autoCapture = Boolean(resp && resp.cortexAutoCapture);
+            window.postMessage({ type: 'cortex-config', autoCapture }, "*");
+        });
+        return;
+    }
+
+    chrome.runtime.sendMessage(detail);
 });
 
 // Downlink: Background -> Extension -> Page

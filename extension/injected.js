@@ -24,6 +24,12 @@ class CortexAgent {
         }
 
         this.initBuffer();
+        // Ask the extension for current config (auto-capture), so we do not require DevTools.
+        try {
+            this.send({ type: 'get_config' });
+        } catch {
+            // ignore
+        }
         console.log("%c CORTEX AGENT ACTIVE ", "background: #000; color: #0f0; font-weight: bold; padding: 4px; border-radius: 4px;");
     }
 
