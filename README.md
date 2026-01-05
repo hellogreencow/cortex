@@ -41,6 +41,7 @@ This is the intended workflow: you reproduce the bug normally, and your coding a
 2. Click the CORTEX extension icon:
    - Paste the auth code
    - Enable **Auto-capture**
+   - Enable **Test this site** (arms capture for the current domain)
    - (Optional) Click **Capture now** to verify the pipeline immediately
 3. Reproduce the bug in the browser.
 4. In Claude Code / Cursor, ask the agent to pull the latest capsule via MCP (see below).

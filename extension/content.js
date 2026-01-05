@@ -8,7 +8,8 @@ chrome.runtime.sendMessage({ type: 'get_config' }, (resp) => {
     const err = chrome.runtime.lastError;
     if (err) return;
     const autoCapture = Boolean(resp && resp.cortexAutoCapture);
-    window.postMessage({ type: 'cortex-config', autoCapture }, "*");
+    const armedOrigins = resp && Array.isArray(resp.cortexArmedOrigins) ? resp.cortexArmedOrigins : [];
+    window.postMessage({ type: 'cortex-config', autoCapture, armedOrigins }, "*");
 });
 
 // Uplink: Page -> Extension -> Background
@@ -33,7 +34,9 @@ window.addEventListener("cortex-uplink", (event) => {
 chrome.runtime.onMessage.addListener((message) => {
     // Forward config updates explicitly for the injected agent.
     if (message && message.type === 'cortex-config') {
-        window.postMessage({ type: 'cortex-config', autoCapture: Boolean(message.autoCapture) }, "*");
+        const autoCapture = Boolean(message.autoCapture);
+        const armedOrigins = Array.isArray(message.armedOrigins) ? message.armedOrigins : [];
+        window.postMessage({ type: 'cortex-config', autoCapture, armedOrigins }, "*");
         return;
     }
 

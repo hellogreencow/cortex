@@ -1,3 +1,15 @@
+(() => {
+    // Idempotent injection: avoid redeclaring globals when we inject multiple times.
+    if (window.__CORTEX_AGENT_LOADED && window.agent) {
+        try {
+            window.agent.send?.({ type: 'get_config' });
+        } catch {
+            // ignore
+        }
+        return;
+    }
+    window.__CORTEX_AGENT_LOADED = true;
+
 class CortexAgent {
     constructor() {
         this.buffer = [];
@@ -6,7 +18,9 @@ class CortexAgent {
         this.lastUnhandledRejection = null;
         this.lastConsoleError = null;
         this.failedFetches = [];
-        this.autoCapture = false;
+        this.autoCaptureWanted = false;
+        this.armedOrigins = [];
+        this.armed = false;
         this._lastAutoCaptureAt = 0;
         this._autoCaptureMinIntervalMs = 5000;
 
@@ -34,12 +48,27 @@ class CortexAgent {
     }
 
     setAutoCapture(enabled) {
-        this.autoCapture = Boolean(enabled);
-        return `Auto-capture ${this.autoCapture ? 'enabled' : 'disabled'}.`;
+        this.autoCaptureWanted = Boolean(enabled);
+        return `Auto-capture ${this.autoCaptureWanted ? 'enabled' : 'disabled'}.`;
+    }
+
+    setArmedOrigins(origins) {
+        this.armedOrigins = Array.isArray(origins) ? origins : [];
+        try {
+            const origin = window.location && window.location.origin ? window.location.origin : '';
+            this.armed = Boolean(origin && this.armedOrigins.includes(origin));
+        } catch {
+            this.armed = false;
+        }
+        return this.armed ? 'Site armed.' : 'Site not armed.';
+    }
+
+    _isAutoCaptureActive() {
+        return Boolean(this.autoCaptureWanted && this.armed);
     }
 
     _maybeAutoCapture(trigger) {
-        if (!this.autoCapture) return;
+        if (!this._isAutoCaptureActive()) return;
         const now = Date.now();
         if (now - this._lastAutoCaptureAt < this._autoCaptureMinIntervalMs) return;
         this._lastAutoCaptureAt = now;
@@ -308,11 +337,9 @@ window.addEventListener("message", (event) => {
     // Configuration updates from the extension.
     if (event.data.type === 'cortex-config') {
         const enabled = Boolean(event.data.autoCapture);
-        try {
-            window.agent?.setAutoCapture?.(enabled);
-        } catch {
-            // ignore
-        }
+        const armedOrigins = Array.isArray(event.data.armedOrigins) ? event.data.armedOrigins : [];
+        try { window.agent?.setAutoCapture?.(enabled); } catch {}
+        try { window.agent?.setArmedOrigins?.(armedOrigins); } catch {}
         return;
     }
 
@@ -332,4 +359,6 @@ window.addEventListener("message", (event) => {
         console.log(`%c CORTEX ERROR: `, "color: #f00", msg.msg);
     }
 });
+
+})();
 

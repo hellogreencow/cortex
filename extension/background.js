@@ -4,6 +4,7 @@ let isAuthenticated = false;
 
 let cortexAuthCode = '';
 let cortexAutoCapture = false;
+let cortexArmedOrigins = [];
 
 // Buffer a small number of high-value messages so auto-capture doesn't lose events during reconnect/auth.
 const pending = [];
@@ -15,9 +16,11 @@ async function loadConfig() {
     const cfg = await chrome.storage.local.get({
         cortexAuthCode: '',
         cortexAutoCapture: false,
+        cortexArmedOrigins: [],
     });
     cortexAuthCode = String(cfg.cortexAuthCode || '');
     cortexAutoCapture = Boolean(cfg.cortexAutoCapture);
+    cortexArmedOrigins = Array.isArray(cfg.cortexArmedOrigins) ? cfg.cortexArmedOrigins : [];
 }
 
 function broadcastToKnownTabs(msg) {
@@ -120,7 +123,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // Config requests (content scripts / popup).
     if (message && message.type === 'get_config') {
-        sendResponse({ cortexAutoCapture });
+        sendResponse({ cortexAutoCapture, cortexArmedOrigins });
         return;
     }
 
@@ -128,7 +131,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         (async () => {
             await loadConfig();
             await tryAuthenticate();
-            broadcastToKnownTabs({ type: 'cortex-config', autoCapture: cortexAutoCapture });
+            broadcastToKnownTabs({ type: 'cortex-config', autoCapture: cortexAutoCapture, armedOrigins: cortexArmedOrigins });
         })();
         return;
     }
