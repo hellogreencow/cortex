@@ -4,7 +4,9 @@ const crypto = require('crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
-const PORT = Number(process.env.CORTEX_PORT || process.env.PORT || 2112);
+// NOTE: do not default to process.env.PORT; many environments set it implicitly and that breaks
+// the extension which assumes 2112 unless explicitly configured.
+const PORT = Number(process.env.CORTEX_PORT || 2112);
 const HOST = process.env.CORTEX_HOST || '127.0.0.1';
 const MAX_PAYLOAD_BYTES = Number(process.env.CORTEX_MAX_PAYLOAD_BYTES || 1024 * 1024);
 const AUTH_CODE = process.env.CORTEX_AUTH_CODE || crypto.randomBytes(8).toString('hex');
