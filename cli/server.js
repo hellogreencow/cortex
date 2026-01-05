@@ -185,6 +185,25 @@ wss.on('connection', (ws) => {
                 return;
             }
 
+            if (data.type === 'capture_request') {
+                const id = makeId();
+                const capsule = normalizeCapsule(data, id);
+
+                console.log(chalk.cyan(`\nIncoming capsule (capture-only)`));
+                console.log(chalk.gray(`ID: ${id}`));
+                if (capsule?.context?.url) console.log(chalk.gray(`URL: ${capsule.context.url}`));
+
+                const capsulePath = path.join(CAPSULES_DIR, `${id}.json`);
+                fs.writeFile(capsulePath, JSON.stringify(capsule, null, 2), 'utf8')
+                    .then(() => {
+                        ws.send(JSON.stringify({ type: 'capsule_saved', id }));
+                    })
+                    .catch(() => {
+                        ws.send(JSON.stringify({ type: 'error', msg: 'CAPSULE_SAVE_FAILED', id }));
+                    });
+                return;
+            }
+
             if (data.type === 'diagnose_request' || data.type === 'fix_request') {
                 const id = makeId();
                 const capsule = normalizeCapsule(data, id);

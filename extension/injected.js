@@ -6,6 +6,9 @@ class CortexAgent {
         this.lastUnhandledRejection = null;
         this.lastConsoleError = null;
         this.failedFetches = [];
+        this.autoCapture = false;
+        this._lastAutoCaptureAt = 0;
+        this._autoCaptureMinIntervalMs = 5000;
 
         // Only instrument once per page.
         if (!window.__cortexInstrumented) {
@@ -24,12 +27,32 @@ class CortexAgent {
         console.log("%c CORTEX AGENT ACTIVE ", "background: #000; color: #0f0; font-weight: bold; padding: 4px; border-radius: 4px;");
     }
 
+    setAutoCapture(enabled) {
+        this.autoCapture = Boolean(enabled);
+        return `Auto-capture ${this.autoCapture ? 'enabled' : 'disabled'}.`;
+    }
+
+    _maybeAutoCapture(trigger) {
+        if (!this.autoCapture) return;
+        const now = Date.now();
+        if (now - this._lastAutoCaptureAt < this._autoCaptureMinIntervalMs) return;
+        this._lastAutoCaptureAt = now;
+        this.capture(`Auto-capture triggered by ${String(trigger || 'signal')}`);
+    }
+
     initErrorCapture() {
         const record = (kind, payload) => {
             const entry = { kind, timestamp: Date.now(), ...payload };
             if (kind === 'error') window.__cortexLastError = entry;
             if (kind === 'unhandledrejection') window.__cortexLastUnhandledRejection = entry;
             if (kind === 'console_error') window.__cortexLastConsoleError = entry;
+
+            // Auto-capture on new signals (if enabled).
+            try {
+                window.agent?._maybeAutoCapture?.(kind);
+            } catch {
+                // ignore
+            }
         };
 
         window.addEventListener('error', (event) => {
@@ -87,6 +110,13 @@ class CortexAgent {
             buf.push(entry);
             while (buf.length > 10) buf.shift();
             window.__cortexFailedFetches = buf;
+
+            // Auto-capture on failed network (if enabled).
+            try {
+                window.agent?._maybeAutoCapture?.('fetch');
+            } catch {
+                // ignore
+            }
         };
 
         if (!window.__cortexFetchWrapped && typeof window.fetch === 'function') {
@@ -164,12 +194,36 @@ class CortexAgent {
         return "Attempting handshake with Cortex Core...";
     }
 
-    diagnose(instruction = "Explain what is happening and what to check next") {
-        if (!this.authCode) {
-            console.warn("%c AUTH REQUIRED ", "color: red; font-weight: bold");
-            return "Please run agent.auth('CODE') first.";
-        }
+    capture(instruction = "Capture a bug capsule") {
+        const lastError = window.__cortexLastError || null;
+        const lastUnhandledRejection = window.__cortexLastUnhandledRejection || null;
+        const lastConsoleError = window.__cortexLastConsoleError || null;
+        const failedFetches = Array.isArray(window.__cortexFailedFetches) ? window.__cortexFailedFetches : [];
 
+        const capsule = {
+            type: 'capture_request',
+            instructions: instruction,
+            context: {
+                url: window.location.href,
+                title: document.title,
+                dom: this.getSnippet(),
+                actions: this.buffer,
+                selection: (window.getSelection?.().toString?.() || '').slice(0, 256),
+                signals: {
+                    lastError,
+                    lastUnhandledRejection,
+                    lastConsoleError,
+                    failedFetches
+                }
+            }
+        };
+        
+        this.send(capsule);
+        return "Bug Capsule transmitted to Cortex (capture-only).";
+    }
+
+    diagnose(instruction = "Explain what is happening and what to check next") {
+        // Same capsule as capture(), but request a diagnosis from the daemon (LLM optional).
         const lastError = window.__cortexLastError || null;
         const lastUnhandledRejection = window.__cortexLastUnhandledRejection || null;
         const lastConsoleError = window.__cortexLastConsoleError || null;
@@ -192,7 +246,7 @@ class CortexAgent {
                 }
             }
         };
-        
+
         this.send(capsule);
         return "Bug Capsule transmitted to Cortex. Diagnosing...";
     }
@@ -243,7 +297,20 @@ window.agent = new CortexAgent();
 
 // Listen for responses from the content script.
 window.addEventListener("message", (event) => {
-    if (!event || !event.data || event.data.type !== "cortex-downlink") return;
+    if (!event || !event.data) return;
+
+    // Configuration updates from the extension.
+    if (event.data.type === 'cortex-config') {
+        const enabled = Boolean(event.data.autoCapture);
+        try {
+            window.agent?.setAutoCapture?.(enabled);
+        } catch {
+            // ignore
+        }
+        return;
+    }
+
+    if (event.data.type !== "cortex-downlink") return;
     const msg = event.data.detail;
     if (msg.type === 'status') {
         console.log(`%c CORTEX: ${msg.msg} `, "color: #0f0");
