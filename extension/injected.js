@@ -290,6 +290,114 @@ class CortexAgent {
         return this.diagnose(instruction);
     }
 
+    testSite() {
+        // Lightweight, safe-ish UI smoke test that stays within the current page session.
+        // It clicks a limited number of visible, non-destructive interactive elements and captures if new errors appear.
+        const run = async () => {
+            const startUrl = window.location.href;
+            const startTs = Date.now();
+            const maxClicks = 15;
+            const clickDelayMs = 250;
+
+            const getLastErrTs = () => (window.__cortexLastError && window.__cortexLastError.timestamp) ? window.__cortexLastError.timestamp : 0;
+            const getLastConsoleErrTs = () => (window.__cortexLastConsoleError && window.__cortexLastConsoleError.timestamp) ? window.__cortexLastConsoleError.timestamp : 0;
+            const getLastUnhandledTs = () => (window.__cortexLastUnhandledRejection && window.__cortexLastUnhandledRejection.timestamp) ? window.__cortexLastUnhandledRejection.timestamp : 0;
+
+            const beforeErr = getLastErrTs();
+            const beforeCon = getLastConsoleErrTs();
+            const beforeUnh = getLastUnhandledTs();
+
+            const dangerousRe = /(delete|remove|destroy|logout|log out|sign out|unsubscribe|checkout|purchase|pay|billing|cancel subscription)/i;
+
+            const isVisible = (el) => {
+                try {
+                    const r = el.getBoundingClientRect();
+                    if (!r || r.width < 4 || r.height < 4) return false;
+                    const style = window.getComputedStyle(el);
+                    if (!style || style.visibility === 'hidden' || style.display === 'none' || style.opacity === '0') return false;
+                    return true;
+                } catch {
+                    return false;
+                }
+            };
+
+            const labelFor = (el) => {
+                const txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+                const aria = (el.getAttribute && el.getAttribute('aria-label')) ? el.getAttribute('aria-label') : '';
+                const id = el.id ? `#${el.id}` : '';
+                return (txt || aria || el.tagName || 'UNKNOWN') + id;
+            };
+
+            const candidates = Array.from(document.querySelectorAll(
+                'button, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"], [onclick]'
+            ))
+                .filter((el) => el && isVisible(el))
+                .filter((el) => {
+                    const txt = (el.innerText || el.textContent || '').trim();
+                    const aria = (el.getAttribute && el.getAttribute('aria-label')) ? el.getAttribute('aria-label') : '';
+                    return !(dangerousRe.test(txt) || dangerousRe.test(aria));
+                })
+                .slice(0, 80);
+
+            let clicks = 0;
+            let issues = 0;
+
+            for (const el of candidates) {
+                if (clicks >= maxClicks) break;
+                clicks += 1;
+
+                try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
+
+                const stepBeforeErr = getLastErrTs();
+                const stepBeforeCon = getLastConsoleErrTs();
+                const stepBeforeUnh = getLastUnhandledTs();
+
+                try {
+                    el.click();
+                } catch {
+                    // ignore click failures
+                }
+
+                await new Promise((r) => setTimeout(r, clickDelayMs));
+
+                // Close obvious overlays/modals.
+                try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); } catch {}
+
+                const stepAfterErr = getLastErrTs();
+                const stepAfterCon = getLastConsoleErrTs();
+                const stepAfterUnh = getLastUnhandledTs();
+
+                if (stepAfterErr > stepBeforeErr || stepAfterCon > stepBeforeCon || stepAfterUnh > stepBeforeUnh) {
+                    issues += 1;
+                    // Capture immediately with context of what we clicked.
+                    const label = labelFor(el);
+                    this.capture(`Auto-test detected error after clicking: ${label}`);
+                    // Throttle a bit to avoid spamming.
+                    await new Promise((r) => setTimeout(r, 300));
+                }
+            }
+
+            const endUrl = window.location.href;
+            const endTs = Date.now();
+
+            const anyNew =
+                getLastErrTs() > beforeErr ||
+                getLastConsoleErrTs() > beforeCon ||
+                getLastUnhandledTs() > beforeUnh;
+
+            // Always capture a summary capsule so the agent can fetch it via MCP.
+            this.capture(
+                `Auto-test complete: clicks=${clicks}, issues=${issues}, urlChanged=${String(endUrl !== startUrl)}, anyNewErrors=${String(anyNew)}`
+            );
+
+            return `Test complete. clicks=${clicks}, issues=${issues}.`;
+        };
+
+        // Fire and forget, but give immediate feedback.
+        run().catch(() => {});
+        return "Test started. Captures will be saved if errors are detected.";
+    }
+
     getSnippet() {
         // Get relevant DOM, minimizing PII by stripping textContent.
         try {

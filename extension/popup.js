@@ -25,6 +25,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const saveBtn = document.getElementById("saveBtn");
   const captureBtn = document.getElementById("captureBtn");
   const diagnoseBtn = document.getElementById("diagnoseBtn");
+  const testBtn = document.getElementById("testBtn");
 
   async function getActiveOrigin() {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -82,6 +83,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           if (!a) return "window.agent is not available on this page.";
           if (m === "capture") return a.capture ? a.capture(n) : "agent.capture is not available.";
           if (m === "diagnose") return a.diagnose ? a.diagnose(n) : "agent.diagnose is not available.";
+          if (m === "test") return a.testSite ? a.testSite() : "agent.testSite is not available.";
           return "Unknown mode.";
         } catch (e) {
           return e && e.message ? String(e.message) : String(e);
@@ -146,6 +148,15 @@ document.addEventListener("DOMContentLoaded", async () => {
       setStatus(res);
     } catch (e) {
       setStatus(`Diagnose failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  });
+
+  testBtn.addEventListener("click", async () => {
+    try {
+      const res = await withActiveTab((tabId) => runInTab(tabId, "test", ""));
+      setStatus(res);
+    } catch (e) {
+      setStatus(`Test failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   });
 });
